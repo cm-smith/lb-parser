@@ -1,0 +1,33 @@
+File: README
+
+Author: Charles Michael Smith
+Date: July 8, 2015
+
+Executing the Program
+---------------------
+Input must be in the following format:
+
+./LBBATS.sh [lbDate]
+
+	[lbDate] - date of the leaderboard to parse in format: yyyy-mm-dd
+
+*NOTE: if no argument is passed the program will default to today's date
+
+Special Considerations
+----------------------
+In the works– if file exists, ask user if they want to proceed.
+If the file exists already, it will be rewritten.
+
+In the works– choice of target directories. 
+Currently, the program requires certain target directories to 
+place output files. The following are required for the program 
+to execute properly:
+
+	lb_crawler - 'res' target directory for HTML document
+
+	lb_indexer - 's_res' target directory for score file
+		     'd_res' target directory for distribution file
+
+	lb_parser  - 'd_graphs' target directory for graph file
+
+
