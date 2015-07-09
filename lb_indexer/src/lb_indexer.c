@@ -4,7 +4,7 @@
  * Author: Charles Michael Smith
  * Date: 7/1/2015
  *
- * Input: example: ./crawler [seedURL] [webPageDirectory] [maxWebPageDepth]
+ * Input: example: ./lb_crawler [leaderboard HTML file]
  *
  * Command line options:
  *
@@ -13,6 +13,7 @@
  * Error Conditions:
  *
  * Special Considerations:
+ * 	TODO: check to see if the file exists. if it does, provide message and bail...or ask the user if they would like to continue
  *
  */
 /* ========================================================================== */
@@ -26,19 +27,26 @@
 #include <sys/stat.h>			     // stat function
 #include <sys/types.h>
 #include <ctype.h>                           // tolower, isalpha
+#include <getopt.h>			     // switch options
 
 
 // ---------------- Local includes  e.g., "file.h"
-#include "common.h"                          // common functionality
-#include "web.h"                             // curl and html functionality
-#include "utils.h"                           // utility functions
-#include "file.h"			     // file utility
+#include "lb_indexer.h"
 
 // ---------------- Constant definitions
-#define SITE "http://frenzy.sparklinlabs.com/leaderboard?date=20131022"
+/*
+#define SITE "http://www.limasky.com/doodlejump/leaderboard/?d=1"
+#define SCORE_TAG "td align=\"right\" style=\"padding-left:4px\">"
+#define KEY ""
+*/
+#define SITE "http://frenzy.sparklinlabs.com/leaderboard?date="//20131022"
 #define SCORE_TAG "td class=\"Score\">"
 #define KEY "Rank"
-#define KEY_SIZE strlen(KEY)
+
+#define S_TAR_DIR "s_res"		// target directory for score files
+#define D_TAR_DIR "d_res"		// target directory for distrib files
+#define KEY_SIZE strlen(KEY)		// size of KEY
+#define DISTRIB_RANGE 1000		// range for distribution
 
 // ---------------- Macro definitions
 #define SAFEFREE(a) free(a); a=NULL;
@@ -48,10 +56,6 @@
 // ---------------- Private variables
 
 // ---------------- Private prototypes
-int GetScoreBoard(const char* doc, int pos, char **score);
-void ParseFile(char *file, char* new_file_name);
-int GetNextScore(char *html, int pos, char **result);
-void RemoveWhitespace(char* str);
 
 /* ========================================================================== */
 
@@ -74,14 +78,24 @@ int main(int argc, char* argv[])
 		return (EXIT_FAILURE);
 	}
 
+	// check for a results target directory
+	// TODO: make name of target directory optional
+	char *s_dir = S_TAR_DIR;
+	char *d_dir = D_TAR_DIR;
+	if(checkDirs(s_dir, d_dir))
+	{
+		return (EXIT_FAILURE);
+	}
 
 	// load the contents of the file into a buffer
 	char *doc = LoadDocument(dat_file);
 	char *word;
 	int pos = 0;
 
+	// parse through to the place in the HTML where the leaderboard begins
 	while((pos = GetNextWord(doc, pos, &word)) > 0 && strncmp(word, KEY, KEY_SIZE) != 0);
 
+	// if the leaderboard is not on this site, bail
 	if(strncmp(word, KEY, KEY_SIZE) != 0)
 	{
 		printf("Leaderboard not present with KEY: |%s|\n", KEY);
@@ -90,74 +104,162 @@ int main(int argc, char* argv[])
 		return (EXIT_FAILURE);
 	}
 
-	// TODO: extract scores from XML
-	char *new_file_name = (char *)malloc(sizeof(char)*20);
-	if(strlen(argv[1]) > 35)
+	// make file_names corresponding to leaderboard date
+	char *score_file_name = (char *)malloc(sizeof(char)*30+strlen(s_dir));
+	memset(score_file_name, 0, sizeof(char)*30);
+	char *distr_file_name = (char *)malloc(sizeof(char)*30+strlen(d_dir));
+	memset(distr_file_name, 0, sizeof(char)*30);
+
+	//printf("Size of file_name is |%lu|\n", strlen(argv[1]));
+	// check to see if files can concatenate with date of leaderboard parsed
+	if(strlen(argv[1]) >= 35)
 	{
-		sprintf(new_file_name, "./scores%.11s", &(argv[1][22]));
+		sprintf(score_file_name, "./%s/scores%.11s.txt", s_dir, &(argv[1][strlen(argv[1])-15]));
+		sprintf(distr_file_name, "./%s/dist%.11s.txt", d_dir, &(argv[1][strlen(argv[1])-15]));
 	}
 	else
 	{
-		sprintf(new_file_name, "./scores-unknown-date");
+		sprintf(score_file_name, "./scores-unknown-date");
+		sprintf(distr_file_name, "./dist-unknown-date");
 	}
 
+	// keep a score file with just scores and ranks
 	FILE* score_file;
-	score_file = fopen(new_file_name, "w");
-/*
-	int word_num = 2;
-
-	while((pos = GetScoreBoard(doc, pos, &word)) > 0)
-	{
-		// create a copy of the word to index in inverted index
-		char *word_copy = malloc(strlen(word)+1);
-		memset(word_copy, 0, strlen(word)+1);
-		strcpy(word_copy, word);
-
-		word_num++;
-
-		// add word to the index, accompanied by document identifier
-		fprintf(score_file, "%s\t", word);
-		
-		if(word_num > 3 && atoi(word) != 0)
-		{
-			word_num = 0;
-			fprintf(score_file, "\n");
-		}
-
-		// free buffer
-		SAFEFREE(word);
-	}
-*/
-
-	// TODO: MAKE A LOG FILE FOR DISTRIBUTION, NOT JUST SCORES...
+	score_file = fopen(score_file_name, "w");
 	
+	// keep a distribution file with distribution of scores
+	FILE* distr_file;
+	distr_file = fopen(distr_file_name, "w");
+
+	// keep track of the rank for score file
 	int rank = 1;
+
+	// to make distribution file
+	int curr_distrib = -1, distrib = 1;
+	int this;
+
+	// to convert score from string to long
+	long curr_score = 0;
+	char* ptr;
+
+	// while there is a score to retrieve
 	while((pos = GetNextScore(doc, pos, &word)) > 0)
 	{
+		// if the word contains whitespace, ignore it
+		// **REQUIRED FOR DOODLEJUMP LEADERBOARD PARSING**
+		if(RemoveWhitespace(word))
+		{
+			continue;
+		}
+
 		//printf("Rank: |%d|\tScore: |%s|\n", rank, word);
+		// print rank and score to score file
 		fprintf(score_file, "%d.\t%s\n", rank, word);
 		rank++;
+
+		// while the word is a long (zero is invalid conversion)
+		curr_score = strtol(word, &ptr, 10);
+		if(curr_score != 0)
+		{
+			// see what distribution THIS score is in
+			this = curr_score/DISTRIB_RANGE;
+			//printf("The distribution for this score is in rank |%d|\n", this);
+			
+			// if THIS is not in the current distribution
+			if(this != curr_distrib)
+			{
+				// and if THIS is not the first conversion
+				if(curr_distrib != -1)
+				{
+					// print distribution range and amount in that range to file
+					fprintf(distr_file, "%d %d\n", curr_distrib, distrib);
+				}
+				// adjust current distribution to this new range
+				curr_distrib = this;
+				distrib = 1;
+			}
+			// otherwise increment the distribution in this range
+			else
+			{
+				distrib++;
+			}
+		}
+
 		SAFEFREE(word);
 	}
 
-	fclose(score_file);
+	// add the last distribution range to the file
+	if(curr_distrib != -1)
+	{
+		fprintf(distr_file, "%d %d\n", curr_distrib, distrib);
+	}
 
+	// close the files
+	fclose(score_file);
+	fclose(distr_file);
+
+	// cleanup
 	SAFEFREE(word);
 	SAFEFREE(doc);
-	SAFEFREE(new_file_name);
+	SAFEFREE(score_file_name);
+	SAFEFREE(distr_file_name);
 
 	return (EXIT_SUCCESS);
 }
 
+/* checkDirs- validates target directories for score and distribution 
+ * resultant files 
+ * @s_dir: the target directory for the score file
+ * @d_dir: the target directory for the distrib file
+ * Returns 0 if the directories are valid, and returns 1 if invalid
+ */
+int checkDirs(char *s_dir, char *d_dir)
+{
+	// initially, the status is zero
+	int status = 0;
+
+	// used in determining directory status
+	struct stat buf1, buf2;
+
+	// if target directory for score file is invalid
+	if((stat(s_dir, &buf1) == -1) || !(S_ISDIR(buf1.st_mode)))
+	{
+		// provide a helpful message and change the return status
+		printf("lb_indexer: please make a valid '%s' directory for score output files\n", s_dir);
+		status = 1;
+	}
+
+	// if target directory for distrib file is invalid
+	if((stat(d_dir, &buf2) == -1) || !(S_ISDIR(buf2.st_mode)))
+	{
+		// provide a helpful message and change the return status
+		printf("lb_indexer: please make a valid '%s' directory for distribution output files\n", d_dir);
+		status = 1;
+	}
+	
+	// return the status of the directories
+	return status;
+}
+
+/* GetScoreBoard- parses HTML and returns the position of the score board
+ * in the document 
+ * @doc: the HTML document to parse
+ * @pos: the current position in the document
+ * @score: the score board key to find in the document
+ * Returns a positive number (pos) if a score board was successfully
+ * found, and returns -1 otherwise
+ */
 int GetScoreBoard(const char* doc, int pos, char **score)
 {
 	const char *beg;		// beginning of score
 	const char *end;		// end of score
 
+	// validate that the document exists
 	if(!doc) {
 		return -1;
 	}
 
+	// while there is a non-alphanumeric character in the document
 	while(doc[pos] && !isalnum(doc[pos])) {
 		// if we find a tag, i.e., <...tag...>, skip it
 		if(doc[pos] == '<') {
@@ -206,12 +308,20 @@ int GetScoreBoard(const char* doc, int pos, char **score)
 	// copy the new word
 	strncpy(*score, beg, end - beg);
 
+	// return the ending position in the HTML document
 	return pos;
 }
 
+/* GetNextScore- parses HTML and returns the next score in the document
+ * @doc: the HTML document to parse
+ * @pos: the current position in the document
+ * @score: the score found in the document
+ * Returns a positive number (pos) if a score was successfully
+ * found, and returns -1 otherwise
+ */
 int GetNextScore(char *html, int pos, char **result)
 {
-	int bad_score = 0;			// is this score ill formatted?
+	int bad_score = 0;		// is this score ill formatted?
 	char *lnk;			// score tags
 	char *score;			// pointer to score
 	char *end;			// end of score
@@ -274,16 +384,24 @@ int GetNextScore(char *html, int pos, char **result)
  *
  * Should have no use outside of this file, thus declared static.
  */
-void RemoveWhitespace(char* str)
+int RemoveWhitespace(char* str)
 {
     char *prev;                              // previous whitespace
     char *cur;                               // current non-whitespace
+
+    int status = 0;
 
     // start at beginning of str
     cur = prev = str;
 
     do {
-        while(isspace(*cur)) cur++;          // consume any whitespace
+        while(isspace(*cur))
+	{
+		status = 1;
+		cur++;          // consume any whitespace
+	}
     } while ((*prev++ = *cur++));            // condense to front of str
+
+    return status;
 }
 

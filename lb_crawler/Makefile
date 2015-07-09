@@ -17,7 +17,6 @@ SRCS = $(SOURCES)
 
 $(EXEC): $(SOURCES) $(UTILLIB)
 	@$(CC) $(CFLAGS) -o $@ $(CFILES) -L../util/ -iquote../util/src/ $(UTILFLAG)
-	@echo "Build successful"
 
 $(OBJS): $(SRCS)
 	@$(CC) $(CFLAGS) -c $(CFILES)
@@ -34,4 +33,3 @@ clean:
 	@rm -f $(EXEC)
 	@rm -f ./src/*.gch
 	@cd ../util && $(MAKE) clean
-	@echo "Clean successful"

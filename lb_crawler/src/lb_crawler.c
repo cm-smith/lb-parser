@@ -35,14 +35,13 @@
 #include <time.h>			     // date specifics
 
 // ---------------- Local includes  e.g., "file.h"
-#include "common.h"                          // common functionality
-#include "web.h"                             // curl and html functionality
-#include "utils.h"                           // utility functions
+#include "lb_crawler.h"
 
 // ---------------- Constant definitions
-#define SITE "http://frenzy.sparklinlabs.com/leaderboard?date="//20131022"
-#define KEY "<th class=\"Rank\">Rank</th>"
-#define TAR_DIR "res"
+#define SITE "http://frenzy.sparklinlabs.com/leaderboard?date="
+//#define SITE "http://www.limasky.com/doodlejump/leaderboard/?d=1"
+
+#define TAR_DIR "res"			// target directory
 
 // ---------------- Macro definitions
 #define SAFEFREE(a) free(a); a=NULL;
@@ -52,11 +51,6 @@
 // ---------------- Private variables
 
 // ---------------- Private prototypes
-void helpStatus();
-void defaultDate(char *lb_date);
-WebPage *createWebPage(char *URL);
-void writeFile(char *file_name, WebPage *page);
-void ParseFile(char *file, char* new_file_name);
 
 /* ========================================================================== */
 
@@ -117,7 +111,11 @@ int main(int argc, char* argv[])
 		
 	}
 
-	strcat(seed, lb_date);
+	// check whether the html requires concatenation
+	if(strncmp(SITE, "http://frenzy.", 14) == 0)
+	{
+		strcat(seed, lb_date);
+	}
 
 	// check for a results target directory
 	// TODO: make name of target directory optional
@@ -221,6 +219,7 @@ WebPage *createWebPage(char *URL)
 {
 
 	WebPage* wp = (WebPage *)malloc(sizeof(WebPage));
+	memset(wp, 0, sizeof(WebPage));
 	wp->url = URL;
 	return wp;
 }
